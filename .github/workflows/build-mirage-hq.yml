@@ -7,70 +7,56 @@ permissions:
   contents: read
 
 jobs:
-  prep:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.release.outputs.tag }}
-      zips: ${{ steps.release.outputs.zips }}
-    steps:
-      - name: Resolve latest TOU-Mira release
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          info=$(gh release view --repo AU-Avengers/TOU-Mira --json tagName,assets)
-          tag=$(jq -r .tagName <<<"$info")
-          zips=$(jq -c '[.assets[] | select(.name | endswith(".zip")) | .name]' <<<"$info")
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "zips=$zips" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag zips=$zips"
-
   build:
-    needs: prep
-    runs-on: self-hosted
-    strategy:
-      fail-fast: false
-      matrix:
-        zip: ${{ fromJson(needs.prep.outputs.zips) }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download zip
+      - name: Fetch latest TOU-Mira release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.prep.outputs.tag }}
-          ZIP: ${{ matrix.zip }}
         run: |
           set -euo pipefail
+          tag=$(gh release view --repo AU-Avengers/TOU-Mira --json tagName --jq .tagName)
           mkdir -p release
-          gh release download "$TAG" --repo AU-Avengers/TOU-Mira --pattern "$ZIP" --dir release
+          gh release download "$tag" --repo AU-Avengers/TOU-Mira --pattern '*.zip' --dir release
           ls -la release
 
-      - name: Inject MirageHQ files
-        env:
-          ZIP: ${{ matrix.zip }}
+      - name: Inject MirageHQ files into each zip
         run: |
           set -euo pipefail
           mkdir -p out
-          root="${ZIP%.zip}"
-          work=$(mktemp -d)
-          unzip -q "release/$ZIP" -d "$work"
-          if [ ! -d "$work/$root" ]; then
-            echo "expected top-level dir '$root' inside $ZIP" >&2
-            exit 1
-          fi
-          while IFS=$'\t' read -r src dst; do
-            mkdir -p "$work/$root/$(dirname "$dst")"
-            cp "assets/$src" "$work/$root/$dst"
-          done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
-          (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$ZIP" .)
+          for zip in release/*.zip; do
+            name=$(basename "$zip")
+            root="${name%.zip}"
+            work=$(mktemp -d)
+            unzip -q "$zip" -d "$work"
+            while IFS=$'\t' read -r src dst; do
+              mkdir -p "$work/$root/$(dirname "$dst")"
+              cp "assets/$src" "$work/$root/$dst"
+            done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
+            (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$name" .)
+          done
           ls -la out
 
-      - name: Upload artifact
+      - name: Upload steam-itch
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.zip }}
-          path: out/${{ matrix.zip }}
+          name: TouMira-steam-itch
+          path: out/*steam-itch*.zip
+          if-no-files-found: error
+
+      - name: Upload epic-msstore
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouMira-epic-msstore
+          path: out/*epic-msstore*.zip
+          if-no-files-found: error
+
+      - name: Upload macOS-linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: TouMira-macOS-linux
+          path: out/*macOS-linux*.zip
           if-no-files-found: error
