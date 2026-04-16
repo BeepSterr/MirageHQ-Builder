@@ -24,6 +24,7 @@ jobs:
           ls -la release
 
       - name: Inject MirageHQ files into each zip
+        id: zips
         run: |
           set -euo pipefail
           mkdir -p out
@@ -39,24 +40,27 @@ jobs:
             (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$name" .)
           done
           ls -la out
+          echo "steam_itch=$(basename out/*steam-itch*.zip)" >> "$GITHUB_OUTPUT"
+          echo "epic_msstore=$(basename out/*epic-msstore*.zip)" >> "$GITHUB_OUTPUT"
+          echo "macos_linux=$(basename out/*macOS-linux*.zip)" >> "$GITHUB_OUTPUT"
 
       - name: Upload steam-itch
         uses: actions/upload-artifact@v4
         with:
-          name: TouMira-steam-itch
-          path: out/*steam-itch*.zip
+          name: ${{ steps.zips.outputs.steam_itch }}
+          path: out/${{ steps.zips.outputs.steam_itch }}
           if-no-files-found: error
 
       - name: Upload epic-msstore
         uses: actions/upload-artifact@v4
         with:
-          name: TouMira-epic-msstore
-          path: out/*epic-msstore*.zip
+          name: ${{ steps.zips.outputs.epic_msstore }}
+          path: out/${{ steps.zips.outputs.epic_msstore }}
           if-no-files-found: error
 
       - name: Upload macOS-linux
         uses: actions/upload-artifact@v4
         with:
-          name: TouMira-macOS-linux
-          path: out/*macOS-linux*.zip
+          name: ${{ steps.zips.outputs.macos_linux }}
+          path: out/${{ steps.zips.outputs.macos_linux }}
           if-no-files-found: error
