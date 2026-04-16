@@ -7,48 +7,70 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  prep:
     runs-on: self-hosted
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      zips: ${{ steps.release.outputs.zips }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Fetch latest TOU-Mira release
+      - name: Resolve latest TOU-Mira release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag=$(gh release view --repo AU-Avengers/TOU-Mira --json tagName --jq .tagName)
+          info=$(gh release view --repo AU-Avengers/TOU-Mira --json tagName,assets)
+          tag=$(jq -r .tagName <<<"$info")
+          zips=$(jq -c '[.assets[] | select(.name | endswith(".zip")) | .name]' <<<"$info")
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "zips=$zips" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag zips=$zips"
+
+  build:
+    needs: prep
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        zip: ${{ fromJson(needs.prep.outputs.zips) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prep.outputs.tag }}
+          ZIP: ${{ matrix.zip }}
+        run: |
+          set -euo pipefail
           mkdir -p release
-          gh release download "$tag" --repo AU-Avengers/TOU-Mira --pattern '*.zip' --dir release
+          gh release download "$TAG" --repo AU-Avengers/TOU-Mira --pattern "$ZIP" --dir release
           ls -la release
 
       - name: Inject MirageHQ files
+        env:
+          ZIP: ${{ matrix.zip }}
         run: |
           set -euo pipefail
           mkdir -p out
-          for zip in release/*.zip; do
-            name=$(basename "$zip")
-            root="${name%.zip}"
-            work=$(mktemp -d)
-            unzip -q "$zip" -d "$work"
-            if [ ! -d "$work/$root" ]; then
-              echo "expected top-level dir '$root' inside $name" >&2
-              exit 1
-            fi
-            while IFS=$'\t' read -r src dst; do
-              mkdir -p "$work/$root/$(dirname "$dst")"
-              cp "assets/$src" "$work/$root/$dst"
-            done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
-            (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$name" .)
-          done
+          root="${ZIP%.zip}"
+          work=$(mktemp -d)
+          unzip -q "release/$ZIP" -d "$work"
+          if [ ! -d "$work/$root" ]; then
+            echo "expected top-level dir '$root' inside $ZIP" >&2
+            exit 1
+          fi
+          while IFS=$'\t' read -r src dst; do
+            mkdir -p "$work/$root/$(dirname "$dst")"
+            cp "assets/$src" "$work/$root/$dst"
+          done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
+          (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$ZIP" .)
           ls -la out
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mirage-hq-${{ steps.release.outputs.tag }}
-          path: out/*.zip
+          name: ${{ matrix.zip }}
+          path: out/${{ matrix.zip }}
           if-no-files-found: error
