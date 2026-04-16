@@ -1,0 +1,54 @@
+name: Build MirageHQ Bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch latest TOU-Mira release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo AU-Avengers/TOU-Mira --json tagName --jq .tagName)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          mkdir -p release
+          gh release download "$tag" --repo AU-Avengers/TOU-Mira --pattern '*.zip' --dir release
+          ls -la release
+
+      - name: Inject MirageHQ files
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for zip in release/*.zip; do
+            name=$(basename "$zip")
+            root="${name%.zip}"
+            work=$(mktemp -d)
+            unzip -q "$zip" -d "$work"
+            if [ ! -d "$work/$root" ]; then
+              echo "expected top-level dir '$root' inside $name" >&2
+              exit 1
+            fi
+            while IFS=$'\t' read -r src dst; do
+              mkdir -p "$work/$root/$(dirname "$dst")"
+              cp "assets/$src" "$work/$root/$dst"
+            done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
+            (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$name" .)
+          done
+          ls -la out
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-hq-${{ steps.release.outputs.tag }}
+          path: out/*.zip
+          if-no-files-found: error

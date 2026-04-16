@@ -1,0 +1,6 @@
+{
+  "AddrData_Sample.cfg": "BepInEx/config/AddrData_Sample.cfg",
+  "AddrData_Sample.dll": "BepInEx/plugins/AddrData_Sample.dll",
+  "Mirage_HQ.bundle": "BepInEx/plugins/Mirage_HQ.bundle",
+  "Mirage_HQ.catalog": "BepInEx/plugins/Mirage_HQ.catalog"
+}
