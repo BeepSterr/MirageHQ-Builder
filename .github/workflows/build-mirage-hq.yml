@@ -23,44 +23,55 @@ jobs:
           gh release download "$tag" --repo AU-Avengers/TOU-Mira --pattern '*.zip' --dir release
           ls -la release
 
-      - name: Inject MirageHQ files into each zip
-        id: zips
+      - name: Inject MirageHQ files into each release bundle
+        id: bundles
         run: |
           set -euo pipefail
+          rm -rf out
           mkdir -p out
+          # Every mapping destination lives under the same top-level folder
+          # (BepInEx); locating it is how we find where to inject.
+          marker=$(jq -r '[.[] | split("/")[0]] | unique | .[0]' mapping.json)
           for zip in release/*.zip; do
-            name=$(basename "$zip")
-            root="${name%.zip}"
-            work=$(mktemp -d)
-            unzip -q "$zip" -d "$work"
+            name=$(basename "$zip" .zip)
+            dest="out/$name"
+            mkdir -p "$dest"
+            unzip -q "$zip" -d "$dest"
+            # Upstream's folder inside the zip is not named after the zip file
+            # (v1.7.3 uses dots in the filename and spaces in the folder), so
+            # anchor on the marker directory rather than assuming they match.
+            root=$(find "$dest" -maxdepth 2 -type d -name "$marker" -printf '%h\n' | head -1)
+            if [ -z "$root" ]; then
+              echo "::error::no '$marker' directory found in $name - upstream layout changed" >&2
+              exit 1
+            fi
             while IFS=$'\t' read -r src dst; do
-              mkdir -p "$work/$root/$(dirname "$dst")"
-              cp "assets/$src" "$work/$root/$dst"
+              mkdir -p "$root/$(dirname "$dst")"
+              cp "assets/$src" "$root/$dst"
             done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' mapping.json)
-            (cd "$work" && zip -qr "$GITHUB_WORKSPACE/out/$name" .)
           done
-          ls -la out
-          echo "steam_itch=$(basename out/*steam-itch*.zip)" >> "$GITHUB_OUTPUT"
-          echo "epic_msstore=$(basename out/*epic-msstore*.zip)" >> "$GITHUB_OUTPUT"
-          echo "macos_linux=$(basename out/*macOS-linux*.zip)" >> "$GITHUB_OUTPUT"
+          find out -maxdepth 2
+          echo "steam_itch=$(basename out/*steam-itch*)" >> "$GITHUB_OUTPUT"
+          echo "epic_msstore=$(basename out/*epic-msstore*)" >> "$GITHUB_OUTPUT"
+          echo "macos_linux=$(basename out/*macOS-linux*)" >> "$GITHUB_OUTPUT"
 
       - name: Upload steam-itch
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.zips.outputs.steam_itch }}
-          path: out/${{ steps.zips.outputs.steam_itch }}
+          name: ${{ steps.bundles.outputs.steam_itch }}
+          path: out/${{ steps.bundles.outputs.steam_itch }}
           if-no-files-found: error
 
       - name: Upload epic-msstore
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.zips.outputs.epic_msstore }}
-          path: out/${{ steps.zips.outputs.epic_msstore }}
+          name: ${{ steps.bundles.outputs.epic_msstore }}
+          path: out/${{ steps.bundles.outputs.epic_msstore }}
           if-no-files-found: error
 
       - name: Upload macOS-linux
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.zips.outputs.macos_linux }}
-          path: out/${{ steps.zips.outputs.macos_linux }}
+          name: ${{ steps.bundles.outputs.macos_linux }}
+          path: out/${{ steps.bundles.outputs.macos_linux }}
           if-no-files-found: error
